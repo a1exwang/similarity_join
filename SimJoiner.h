@@ -41,8 +41,13 @@ private:
     );
 
     void readFile(std::vector<std::vector<std::string>> &lines, std::ifstream &fs);
-    static double jaccard(const std::vector<std::string> &s1, const std::vector<std::string> &s2);
+    static double jaccard(const std::vector<std::string> &s1,
+                          const std::vector<std::string> &s2,
+                          std::function<bool (const std::string &, const std::string &)>);
     static void sortWordsByIDF(std::vector<std::string> &words, const std::map<std::string, int> &dict);
+    static std::function<bool (const std::string &, const std::string &)> getIDFComparator(
+        const std::map<std::string, int> &dict
+    );
 };
 
 #endif
