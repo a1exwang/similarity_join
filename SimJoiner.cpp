@@ -4,6 +4,9 @@
 #include <iostream>
 #include <set>
 #include <algorithm>
+#include <cstring>
+#include <cmath>
+#include <cassert>
 
 
 using namespace std;
@@ -130,8 +133,7 @@ int SimJoiner::joinJaccard(const char *filename1,
     auto i1 = r_item.first.first;
     auto i2 = r_item.first.second;
     auto j = r_item.second;
-    if (i1 <= i2) {
-      result.push_back({i1, i2, j});
+    result.push_back({i1, i2, j});
 
 //      cout << "file1[" << i1 << "]( ";
 //      for (auto w : lines1[i1]) {
@@ -142,14 +144,58 @@ int SimJoiner::joinJaccard(const char *filename1,
 //        cout << w << ' ';
 //      }
 //      cout << "), " << j << endl;
-    }
   }
 
   return SUCCESS;
 }
 
-int SimJoiner::joinED(const char *filename1, const char *filename2, unsigned threshold, vector<EDJoinResult> &result) {
+int SimJoiner::joinED(const char *filename1, const char *filename2, unsigned tau, vector<EDJoinResult> &result) {
   result.clear();
+
+  ifstream fs1(filename1);
+  vector<string> lines1;
+  ifstream fs2(filename2);
+  vector<string> lines2;
+  map<int, map<int, map<string, vector<int>>>> idx1;
+  map<int, map<int, map<string, vector<int>>>> idx2;
+  readFile(lines1, fs1);
+  readFile(lines2, fs2);
+
+  // 1. Create segment index for file2
+  createEDInvertedIndex(idx2, lines2, tau);
+
+  // 2. For each line in file1
+  //  3. Segment the line, scan for the segments, and get candidates
+  map<int, int> resultMap;
+  auto cb = [tau, &idx2, &resultMap](int l, int rid1, int p, const string &segment) {
+      for (int i = 0; i <= tau; ++i) {
+        if (idx2.find(l - i) != idx2.end()) {
+          for (auto pair2 : idx2[l - i]) {
+            int pos2 = pair2.first;
+            auto &segs = pair2.second;
+            if (pos2 /* in my position */) {
+              if (segs.find(segment) != segs.end()) {
+                for (auto rid2 : segs[segment])
+                  resultMap[rid1] = rid2;
+              }
+            }
+          }
+        }
+      }
+  };
+  createEDInvertedIndex(idx1, lines1, tau, cb);
+
+  // 4. Verification
+  for (auto p : resultMap) {
+    auto l1 = p.first;
+    auto l2 = p.second;
+    auto ed = editDist(lines1[l1], lines2[l2]);
+//    auto ed = editDist1(lines1[l1].c_str(), lines2[l2].c_str(), lines1[l1].size(), lines2[l2].size());
+    if (ed <= tau) {
+      result.push_back({(unsigned)l1, (unsigned)l2, (unsigned)ed});
+      cout << l1 << ", " << l2 << "   " << ed << endl;
+    }
+  }
   return SUCCESS;
 }
 
@@ -229,4 +275,126 @@ SimJoiner::getIDFComparator(const std::map<std::string, int> &dict) {
         return false;
       }
   };
+}
+
+int SimJoiner::editDist(const std::string &s1, const string &s2) {
+  int tmp[s1.size()+1][s2.size()+1];
+  memset(tmp, 0, (s1.size()+1)*(s2.size()+1) * sizeof(int));
+
+  int i = 0;
+  int j = 0;
+  while (true) {
+    if (i == 0 && j == 0) {
+      tmp[i][j] = 0;
+    }
+    else if (i == 0) {
+      tmp[i][j] = tmp[i][j-1] + 1;
+    }
+    else if (j == 0) {
+      tmp[i][j] = tmp[i-1][j] + 1;
+    }
+    else {
+      int a = tmp[i][j - 1] + 1;
+      int b = tmp[i-1][j] + 1;
+      int c = tmp[i-1][j-1] + (s1[i - 1] == s2[j - 1] ? 0 : 1);
+      tmp[i][j] = min({a, b, c});
+    }
+
+    if (i == (int)s1.size() && j == (int)s2.size()) {
+      break;
+    }
+
+    if (j == 0 || i == (int)s1.size()) {
+      if (i + j + 1 <= (int)s2.size()) {
+        j = i + j + 1;
+        i = 0;
+      }
+      else {
+        i = i + j + 1 - (int)s2.size();
+        j = (int)s2.size();
+      }
+    }
+    else {
+      i++;
+      j--;
+    }
+  }
+  auto result = tmp[s1.size()][s2.size()];
+  return result;
+}
+
+void SimJoiner::readFile(std::vector<std::string> &lines, std::ifstream &fs) {
+  string line;
+  while (std::getline(fs, line)) {
+    lines.push_back(line);
+  }
+}
+
+void SimJoiner::createEDInvertedIndex(
+    map<int, map<int, map<string, vector<int>>>> &idx,
+    const std::vector<std::string> &lines,
+    int tau,
+    function<void (int l, int rid, int p, const string &segment)> cb) {
+
+
+  for (int rid = 0; rid < lines.size(); rid++) {
+    int l = (int)lines[rid].size();
+    const string &line = lines[rid];
+    if (idx.find(l) == idx.end()) {
+      idx[l] = map<int, map<string , vector<int>>>();
+    }
+    map<int, map<string, vector<int>>> s2;
+    map<string, vector<int>> s1;
+    vector<int> segments;
+    int segmentCount1 = l % (tau + 1);
+    int segmentLen1 = (int)std::ceil((double)l / (tau + 1));
+    int segmentCount2 = tau + 1 - segmentCount1;
+    int segmentLen2 = (l - segmentCount1 * segmentLen1) / segmentCount2;
+    assert(segmentLen2 == (int)std::floor((double) l / (tau + 1)));
+
+    for (int j = 0; j < segmentCount1; ++j) {
+      int p = j * segmentLen1;
+      auto seg = line.substr((unsigned)p, (unsigned)segmentLen1);
+      cb(l, rid, p, seg);
+
+      if (idx[l].find(p) == idx[l].end()) {
+        idx[l][p] = map<string, vector<int>>();
+      }
+      if (idx[l][p].find(seg) == idx[l][p].end()) {
+        idx[l][p][seg] = vector<int>();
+      }
+      idx[l][p][seg].push_back(rid);
+    }
+    for (int j = 0; j < segmentCount2; ++j) {
+      int p = j * segmentLen2 + segmentCount1 * segmentLen1;
+      auto seg = line.substr((unsigned)p, (unsigned)segmentLen2);
+      cb(l, rid, p, seg);
+
+      if (idx[l].find(p) == idx[l].end()) {
+        idx[l][p] = map<string, vector<int>>();
+      }
+      if (idx[l][p].find(seg) == idx[l][p].end()) {
+        idx[l][p][seg] = vector<int>();
+      }
+      idx[l][p][seg].push_back(rid);
+    }
+  }
+}
+
+void SimJoiner::createEDInvertedIndex(
+    map<int, map<int, map<string, vector<int>>>> &idx,
+    const std::vector<std::string> &lines, int tau) {
+  createEDInvertedIndex(idx, lines, tau, [](int, int, int, string) -> void {});
+
+}
+
+int editDist1(const char *str1, const char *str2, uint32_t m, uint32_t n) {
+  if (m == 0) return n;
+  if (n == 0) return m;
+  if (str1[m - 1] == str2[n - 1])
+    return editDist1(str1, str2, m-1, n-1);
+
+  return 1 + min({editDist1(str1,  str2, m, n-1),
+                  editDist1(str1,  str2, m-1, n),
+                  editDist1(str1,  str2, m-1, n-1)});
 }
