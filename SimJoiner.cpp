@@ -130,17 +130,19 @@ int SimJoiner::joinJaccard(const char *filename1,
     auto i1 = r_item.first.first;
     auto i2 = r_item.first.second;
     auto j = r_item.second;
-    result.push_back({i1, i2, j});
+    if (i1 <= i2) {
+      result.push_back({i1, i2, j});
 
-//    cout << "file1[" << i1 << "]( ";
-//    for (auto w : lines1[i1]) {
-//      cout << w << ' ';
-//    }
-//    cout << "), " << "file2[" << i2 << "]( ";
-//    for (auto w : lines2[i2]) {
-//      cout << w << ' ';
-//    }
-//    cout << "), " << j << endl;
+//      cout << "file1[" << i1 << "]( ";
+//      for (auto w : lines1[i1]) {
+//        cout << w << ' ';
+//      }
+//      cout << "), " << "file2[" << i2 << "]( ";
+//      for (auto w : lines2[i2]) {
+//        cout << w << ' ';
+//      }
+//      cout << "), " << j << endl;
+    }
   }
 
   return SUCCESS;
