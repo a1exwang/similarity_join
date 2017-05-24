@@ -20,8 +20,6 @@ typedef JoinResult<unsigned, unsigned> EDJoinResult;
 const int SUCCESS = 0;
 const int FAILURE = 1;
 
-inline int editDist1(const char *str1 , const char *str2 , uint32_t m , uint32_t n);
-
 class SimJoiner {
 public:
     SimJoiner();
@@ -54,11 +52,6 @@ private:
     static int editDist(const std::string &s1, const std::string &s2);
 
     void readFile(std::vector<std::string> &lines, std::ifstream &fs);
-    void createEDInvertedIndex(
-        std::map<int, std::map<int, std::map<std::string, std::vector<int>>>> &idx,
-        const std::vector<std::string> &lines,
-        int tau,
-        std::function<void (int l, int rid, int p, const std::string &segment)> cb);
 
     void createEDInvertedIndex(
         std::map<int, std::map<int, std::map<std::string, std::vector<int>>>> &idx,

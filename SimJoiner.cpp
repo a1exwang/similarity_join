@@ -7,6 +7,7 @@
 #include <cstring>
 #include <cmath>
 #include <cassert>
+#define MY_DEBUG
 
 
 using namespace std;
@@ -163,37 +164,78 @@ int SimJoiner::joinED(const char *filename1, const char *filename2, unsigned tau
 
   // 1. Create segment index for file2
   createEDInvertedIndex(idx2, lines2, tau);
+//  for (auto a : idx2) {
+//    for (auto b : a.second) {
+//      for (auto c : b.second) {
+//        for (auto i : c.second) {
+//          cout << a.first << " " << b.first << " " << c.first << " " << i << endl;
+//        }
+//      }
+//    }
+//  }
 
   // 2. For each line in file1
   //  3. Segment the line, scan for the segments, and get candidates
-  map<int, int> resultMap;
-  auto cb = [tau, &idx2, &resultMap](int l, int rid1, int p, const string &segment) {
-      for (int i = 0; i <= tau; ++i) {
-        if (idx2.find(l - i) != idx2.end()) {
-          for (auto pair2 : idx2[l - i]) {
-            int pos2 = pair2.first;
-            auto &segs = pair2.second;
-            if (pos2 /* in my position */) {
-              if (segs.find(segment) != segs.end()) {
-                for (auto rid2 : segs[segment])
-                  resultMap[rid1] = rid2;
+  set<pair<int, int>> resultMap;
+  for (int rid1 = 0; rid1 < lines1.size(); ++rid1) {
+    auto &line1 = lines1[rid1];
+    int l1 = (int) line1.size();
+#ifdef MY_DEBUG
+    cout << "rid1: " << rid1 << ' ' << line1 << endl;
+#endif
+    for (int deltaTau = -tau; deltaTau <= (int)tau; ++deltaTau) {
+      int l2 = l1 + deltaTau;
+      if (idx2.find(l2) != idx2.end()) {
+#ifdef MY_DEBUG
+        cout << "\tnearly_same_len: " << l2 << endl;
+#endif
+        int i = 1;
+        for (auto pair2 : idx2[l2]) {
+          // pos2 is pi
+          int pos2 = pair2.first + 1;
+          auto &segs = pair2.second;
+          int delta = l1 - l2;
+          int lowerBound = max({pos2 - (i - 1), pos2 + delta - ((int) tau + 1 - i)});
+          int upperBound = min({pos2 + (i - 1), pos2 + delta + ((int) tau + 1 - i)});
+#ifdef MY_DEBUG
+          cout << "\t\tpos2 = " << pos2 << endl;
+          cout << "\t\t[" << lowerBound << ", " << upperBound << "]" << endl;
+#endif
+          for (int startPos1 = lowerBound; startPos1 <= upperBound; ++startPos1) {
+            auto segLen = segs.begin()->first.size();
+            if (startPos1-1 + segLen <= line1.size()) {
+              auto subs = line1.substr((unsigned)startPos1-1, segLen);
+#ifdef MY_DEBUG
+              cout << "\t\t\ttrying (" << startPos1 << ", " << subs << ")" << endl;
+#endif
+              if (segs.find(subs) != segs.end()) {
+                const string &seg = subs;
+                const vector<int> &ridOfSegs2 = segs[subs];
+                for (auto rid2 : ridOfSegs2)
+                  resultMap.insert({rid1, rid2});
               }
             }
           }
+          i++;
         }
       }
-  };
-  createEDInvertedIndex(idx1, lines1, tau, cb);
+    }
+  }
+
+#ifdef MY_DEBUG
+  cout << "resultMap.size() = " << resultMap.size() << endl;
+#endif
 
   // 4. Verification
   for (auto p : resultMap) {
     auto l1 = p.first;
     auto l2 = p.second;
     auto ed = editDist(lines1[l1], lines2[l2]);
-//    auto ed = editDist1(lines1[l1].c_str(), lines2[l2].c_str(), lines1[l1].size(), lines2[l2].size());
     if (ed <= tau) {
       result.push_back({(unsigned)l1, (unsigned)l2, (unsigned)ed});
+#ifdef MY_DEBUG
       cout << l1 << ", " << l2 << "   " << ed << endl;
+#endif
     }
   }
   return SUCCESS;
@@ -333,8 +375,7 @@ void SimJoiner::readFile(std::vector<std::string> &lines, std::ifstream &fs) {
 void SimJoiner::createEDInvertedIndex(
     map<int, map<int, map<string, vector<int>>>> &idx,
     const std::vector<std::string> &lines,
-    int tau,
-    function<void (int l, int rid, int p, const string &segment)> cb) {
+    int tau) {
 
 
   for (int rid = 0; rid < lines.size(); rid++) {
@@ -346,16 +387,15 @@ void SimJoiner::createEDInvertedIndex(
     map<int, map<string, vector<int>>> s2;
     map<string, vector<int>> s1;
     vector<int> segments;
-    int segmentCount1 = l % (tau + 1);
-    int segmentLen1 = (int)std::ceil((double)l / (tau + 1));
-    int segmentCount2 = tau + 1 - segmentCount1;
-    int segmentLen2 = (l - segmentCount1 * segmentLen1) / segmentCount2;
-    assert(segmentLen2 == (int)std::floor((double) l / (tau + 1)));
+    int segmentCount2 = l % (tau + 1);
+    int segmentLen2 = (int)std::ceil((double)l / (tau + 1));
+    int segmentCount1 = tau + 1 - segmentCount2;
+    int segmentLen1 = (l - segmentCount2 * segmentLen2) / segmentCount1;
+    assert(segmentLen1 == (int)std::floor((double) l / (tau + 1)));
 
     for (int j = 0; j < segmentCount1; ++j) {
       int p = j * segmentLen1;
       auto seg = line.substr((unsigned)p, (unsigned)segmentLen1);
-      cb(l, rid, p, seg);
 
       if (idx[l].find(p) == idx[l].end()) {
         idx[l][p] = map<string, vector<int>>();
@@ -368,7 +408,6 @@ void SimJoiner::createEDInvertedIndex(
     for (int j = 0; j < segmentCount2; ++j) {
       int p = j * segmentLen2 + segmentCount1 * segmentLen1;
       auto seg = line.substr((unsigned)p, (unsigned)segmentLen2);
-      cb(l, rid, p, seg);
 
       if (idx[l].find(p) == idx[l].end()) {
         idx[l][p] = map<string, vector<int>>();
@@ -381,20 +420,3 @@ void SimJoiner::createEDInvertedIndex(
   }
 }
 
-void SimJoiner::createEDInvertedIndex(
-    map<int, map<int, map<string, vector<int>>>> &idx,
-    const std::vector<std::string> &lines, int tau) {
-  createEDInvertedIndex(idx, lines, tau, [](int, int, int, string) -> void {});
-
-}
-
-int editDist1(const char *str1, const char *str2, uint32_t m, uint32_t n) {
-  if (m == 0) return n;
-  if (n == 0) return m;
-  if (str1[m - 1] == str2[n - 1])
-    return editDist1(str1, str2, m-1, n-1);
-
-  return 1 + min({editDist1(str1,  str2, m, n-1),
-                  editDist1(str1,  str2, m-1, n),
-                  editDist1(str1,  str2, m-1, n-1)});
-}
